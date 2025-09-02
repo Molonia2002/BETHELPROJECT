@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bethelsolv Standalone Calculator</title>
+    <!--
+      This script loads Tailwind CSS from a CDN. It enables utility-first styling.
+      We're using a single file approach here, which is why Tailwind is loaded this way.
+    -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Apply a custom font for better aesthetics */
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      /* Ensure the canvas is responsive and maintains a 16:9 aspect ratio */
+      .canvas-container {
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%; /* 16:9 Aspect Ratio */
+      }
+      .canvas-container canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+      /* For text output that contains Markdown, apply the prose styles */
+      .prose {
+        max-width: none !important;
+      }
+    </style>
+    <!--
+      Load the Inter font from Google Fonts.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-4 md:p-8">
+    <div id="root"></div>
+
+    <!--
+      Load React and ReactDOM from CDN. This is required to run the application
+      as a single HTML file without a build step.
+    -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+
+    <!--
+      Load the Math.js library for calculations.
+    -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.1/math.min.js"></script>
+    
+    <!--
+      This is the core of the application. The user's React code is placed here
+      inside a script tag with the type "text/babel". Babel transpiles the JSX
+      syntax into regular JavaScript that the browser can understand.
+    -->
+    <script type="text/babel">
+      // Main App component for the Bethelsolv calculator
+      function App() {
+        // State variables for the main application
+        const [activeTab, setActiveTab] = React.useState('real-analysis'); // 'real-analysis' or 'scientific'
+        const [analysisSubTab, setAnalysisSubTab] = React.useState('limits'); // 'limits', 'continuity', 'differentiability'
+        const [analysisFunction, setAnalysisFunction] = React.useState('x^2');
+        const [analysisPoint, setAnalysisPoint] = React.useState(0);
+        const [analysisResult, setAnalysisResult] = React.useState(null);
+        const [analysisSolution, setAnalysisSolution] = React.useState('');
+        const [scientificInput, setScientificInput] = React.useState('');
+        const [scientificResult, setScientificResult] = React.useState('');
+        const [isLoading, setIsLoading] = React.useState(false);
+        const [error, setError] = React.useState('');
+        
+        // Reference to the canvas for plotting
+        const canvasRef = React.useRef(null);
+        
+        // Use an effect to re-plot the graph whenever relevant state changes
+        React.useEffect(() => {
+            const plotGraphWithState = () => {
+                plotGraph(analysisFunction, analysisPoint, {
+                    result: analysisResult,
+                    subTab: analysisSubTab,
+                });
+            };
+            plotGraphWithState(); // Initial plot
+            
+            // Add event listener for window resize to redraw the graph
+            window.addEventListener('resize', plotGraphWithState);
+            return () => window.removeEventListener('resize', plotGraphWithState);
+        }, [analysisFunction, analysisPoint, analysisResult, analysisSubTab]);
+        
+        // --- Core Real Analysis Logic ---
+        
+        // Function to compute the analysis based on the selected sub-tab
+        const handleCompute = () => {
+          setError('');
+          setAnalysisResult(null);
+          setAnalysisSolution('');
+          setIsLoading(true);
+          
+          if (!window.math) {
+            setError('Math.js library is not loaded yet. Please wait a moment.');
+            setIsLoading(false);
+            return;
+          }
+          
+          try {
+            // First, try to parse the function to catch syntax errors immediately.
+            const expr = window.math.parse(analysisFunction);
+            
+            const a = parseFloat(analysisPoint);
+            if (isNaN(a)) {
+              setError('Point of interest must be a valid number.');
+              setIsLoading(false);
+              return;
+            }
+            
+            let result;
+            let solution;
+            switch (analysisSubTab) {
+              case 'limits':
+                result = computeLimit(analysisFunction, a, expr);
+                solution = generateClientSideSolution('limits', analysisFunction, a, result);
+                break;
+              case 'continuity':
+                result = checkContinuity(analysisFunction, a, expr);
+                solution = generateClientSideSolution('continuity', analysisFunction, a, result);
+                break;
+              case 'differentiability':
+                result = testDifferentiability(analysisFunction, a, expr);
+                solution = generateClientSideSolution('differentiability', analysisFunction, a, result);
+                break;
+              default:
+                result = { text: 'Invalid operation.' };
+                solution = 'Invalid operation requested.';
+                break;
+            }
+            setAnalysisResult(result.text);
+            setAnalysisSolution(solution);
+            
+            // Plot the graph after computation
+            plotGraph(analysisFunction, a, {
+                result: result.text,
+                subTab: analysisSubTab
+            });
+          } catch (e) {
+            console.error("Error during computation:", e);
+            setError(`An error occurred: ${e.message}. Please check your function and point.`);
+          } finally {
+            setIsLoading(false);
+          }
+        };
+        
+        // Helper function to compute the limit
+        const computeLimit = (funcStr, a, expr) => {
+          const scope = { x: 0 };
+          const h = 1e-6;
+          
+          // Approach from the left
+          scope.x = a - h;
+          const leftLimit = expr.evaluate(scope);
+          
+          // Approach from the right
+          scope.x = a + h;
+          const rightLimit = expr.evaluate(scope);
+          
+          if (Math.abs(leftLimit - rightLimit) < 1e-5) {
+            return { text: `Limit is ${leftLimit.toFixed(4)}`, value: leftLimit };
+          } else {
+            return { text: `The limit does not exist.`, value: null };
+          }
+        };
+        
+        // Helper function to check continuity
+        const checkContinuity = (funcStr, a, expr) => {
+          const scope = { x: a };
+          const h = 1e-6;
+          
+          // Condition 1: f(a) is defined
+          let fa;
+          try {
+            fa = expr.evaluate(scope);
+            if (!isFinite(fa)) {
+              return { text: 'Discontinuous: f(a) is not defined.', continuous: false, fa: null };
+            }
+          } catch (e) {
+            return { text: 'Discontinuous: f(a) is not defined.', continuous: false, fa: null };
+          }
+          
+          // Condition 2: Limit exists
+          scope.x = a - h;
+          const leftLimit = expr.evaluate(scope);
+          scope.x = a + h;
+          const rightLimit = expr.evaluate(scope);
+          if (Math.abs(leftLimit - rightLimit) > 1e-5) {
+            return { text: 'Discontinuous: The limit does not exist.', continuous: false, fa: fa };
+          }
+          const limit = leftLimit;
+          
+          // Condition 3: Limit equals f(a)
+          if (Math.abs(limit - fa) < 1e-5) {
+            return { text: 'The function is continuous at this point.', continuous: true, fa: fa };
+          } else {
+            return { text: 'Discontinuous: The limit is not equal to f(a).', continuous: false, fa: fa };
+          }
+        };
+        
+        // Helper function to test differentiability
+        const testDifferentiability = (funcStr, a, expr) => {
+          const derivativeExpr = window.math.derivative(expr, 'x');
+          const scope = { x: a };
+          
+          try {
+            const derivativeValue = derivativeExpr.evaluate(scope);
+            if (isFinite(derivativeValue)) {
+              return { text: `The function is differentiable. Derivative: ${derivativeValue.toFixed(4)}.`, differentiable: true };
+            } else {
+              return { text: 'Not differentiable. The derivative does not exist.', differentiable: false };
+            }
+          } catch (e) {
+            return { text: 'Not differentiable. The derivative is not defined.', differentiable: false };
+          }
+        };
+
+        // This is the new, standalone function to generate the detailed solution
+        const generateClientSideSolution = (type, func, point, result) => {
+            let solution = '';
+            switch(type) {
+                case 'limits':
+                    solution = `### Detailed Solution for Limits
+                    
+To find the limit of $f(x) = ${func}$ as $x$ approaches $a = ${point}$, we check the behavior of the function from both the left and right sides of the point.
+1.  **Left-hand limit:** We evaluate the function for values of $x$ slightly less than ${point}$.
+2.  **Right-hand limit:** We evaluate the function for values of $x$ slightly greater than ${point}$.
+3.  **Conclusion:** The limit exists if and only if the left-hand limit is equal to the right-hand limit.
+
+**Result:** ${result.text}`;
+                    break;
+                case 'continuity':
+                    solution = `### Detailed Solution for Continuity
+                    
+To determine if $f(x) = ${func}$ is continuous at $a = ${point}$, we must check three conditions:
+1.  **Is $f(a)$ defined?** The function must have a defined value at the point.
+2.  **Does the limit exist?** The limit of the function as $x$ approaches $a$ must exist. This requires the left-hand and right-hand limits to be equal.
+3.  **Does the limit equal $f(a)$?** The value of the limit must be equal to the value of the function at the point.
+
+**Result:** ${result.text}`;
+                    break;
+                case 'differentiability':
+                    solution = `### Detailed Solution for Differentiability
+                    
+To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determine if the derivative of the function exists at that point. A function is differentiable at a point if it is both continuous at that point and has a well-defined, non-vertical tangent line. In other words, the derivative must be a finite number.
+
+**Result:** ${result.text}`;
+                    break;
+                default:
+                    solution = 'Solution generation not supported for this type.';
+            }
+            return solution;
+        };
+        
+        // --- Graph Plotting Logic ---
+        const plotGraph = (funcStr, point, analysisData) => {
+          // This check prevents the error when the function input is empty or invalid.
+          if (!window.math || !canvasRef.current || typeof funcStr !== 'string' || funcStr.trim() === '') {
+            // Clear the canvas to avoid showing old data.
+            if (canvasRef.current) {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            }
+            return;
+          }
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext('2d');
+          const dpr = window.devicePixelRatio || 1;
+          const rect = canvas.getBoundingClientRect();
+          canvas.width = rect.width * dpr;
+          canvas.height = rect.height * dpr;
+          ctx.scale(dpr, dpr);
+          
+          ctx.clearRect(0, 0, rect.width, rect.height);
+          
+          try {
+            const expr = window.math.parse(funcStr);
+            const scope = { x: 0 };
+            const xScale = rect.width / 10;
+            const yScale = rect.height / 10;
+            const xOffset = rect.width / 2;
+            const yOffset = rect.height / 2;
+            const step = 0.05; // Smaller step for smoother curves
+            
+            // Draw axes
+            ctx.beginPath();
+            ctx.strokeStyle = '#4B5563'; // Darker color for visibility
+            ctx.lineWidth = 1;
+            
+            // X-axis
+            ctx.moveTo(0, yOffset);
+            ctx.lineTo(rect.width, yOffset);
+            
+            // Y-axis
+            ctx.moveTo(xOffset, 0);
+            ctx.lineTo(xOffset, rect.height);
+            ctx.stroke();
+            
+            // Draw labels and origin
+            ctx.fillStyle = '#4B5563';
+            ctx.font = '12px Inter';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('0', xOffset - 10, yOffset - 10);
+            ctx.fillText('x', rect.width - 15, yOffset - 15);
+            ctx.fillText('y', xOffset - 15, 15);
+            
+            // Draw the function
+            ctx.beginPath();
+            ctx.strokeStyle = '#2563EB';
+            ctx.lineWidth = 2;
+            
+            let isFirstPoint = true;
+            for (let x = -5; x <= 5; x += step) {
+              scope.x = x;
+              const y = expr.evaluate(scope);
+              if (isFinite(y)) {
+                const canvasX = x * xScale + xOffset;
+                const canvasY = -y * yScale + yOffset;
+                if (isFirstPoint) {
+                  ctx.moveTo(canvasX, canvasY);
+                  isFirstPoint = false;
+                } else {
+                  ctx.lineTo(canvasX, canvasY);
+                }
+              }
+            }
+            ctx.stroke();
+
+            // --- Add visualizations for Limits and Continuity ---
+            if (analysisData.result) {
+              const a = parseFloat(point);
+              const canvasX_a = a * xScale + xOffset;
+              
+              // Visualizing Continuity and Discontinuity
+              if (analysisData.subTab === 'continuity') {
+                  const continuityResult = checkContinuity(funcStr, a, expr);
+                  const fa = continuityResult.fa;
+                  if (fa !== null && !continuityResult.continuous) {
+                      // Draw a small red circle for discontinuity
+                      const canvasY_fa = -fa * yScale + yOffset;
+                      ctx.beginPath();
+                      ctx.arc(canvasX_a, canvasY_fa, 5, 0, 2 * Math.PI);
+                      ctx.fillStyle = '#EF4444'; // Red color
+                      ctx.fill();
+                  }
+              }
+
+              // Visualizing Limits
+              if (analysisData.subTab === 'limits' || analysisData.subTab === 'continuity') {
+                  const limitResult = computeLimit(funcStr, a, expr);
+                  const limitValue = limitResult.value;
+
+                  if (limitValue !== null && isFinite(limitValue)) {
+                      const canvasY_limit = -limitValue * yScale + yOffset;
+
+                      // Draw a small blue circle to show the limit point
+                      ctx.beginPath();
+                      ctx.arc(canvasX_a, canvasY_limit, 5, 0, 2 * Math.PI);
+                      ctx.fillStyle = '#3B82F6'; // Blue color
+                      ctx.fill();
+                  }
+              }
+            }
+            
+          } catch (e) {
+            console.error("Error plotting graph:", e);
+          }
+        };
+        
+        // --- Scientific Calculator Logic ---
+        const handleScientificButtonClick = (value) => {
+          if (!window.math) {
+            setError('Math.js library is not loaded yet.');
+            return;
+          }
+          if (value === 'C') {
+            setScientificInput('');
+            setScientificResult('');
+          } else if (value === 'DEL') {
+            setScientificInput((prev) => prev.slice(0, -1));
+          } else if (value === '=') {
+            try {
+              const result = window.math.evaluate(scientificInput);
+              setScientificResult(window.math.format(result, { precision: 14 }));
+            } catch (e) {
+              setScientificResult('Error');
+            }
+          } else if (['sin', 'cos', 'tan', 'sqrt', 'log', 'ln'].includes(value)) {
+            setScientificInput((prev) => prev + value + '(');
+          } else {
+            setScientificInput((prev) => prev + value);
+          }
+        };
+        
+        const ScientificCalculator = () => (
+          <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700 w-full max-w-sm">
+            <div className="bg-gray-900 p-4 rounded-lg border border-gray-700 mb-4 min-h-[5rem] flex flex-col justify-end items-end">
+              <div className="text-right text-sm text-gray-400 break-all">{scientificInput}</div>
+              <div className="text-right text-3xl text-white font-bold break-all">{scientificResult}</div>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {['C', '(', ')', 'DEL', '/'].map(btn => (
+                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+              ))}
+              {['sin', 'cos', 'tan', 'sqrt', '*'].map(btn => (
+                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+              ))}
+              {['7', '8', '9', '^', '-'].map(btn => (
+                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+              ))}
+              {['4', '5', '6', 'log', '+'].map(btn => (
+                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+              ))}
+              {['1', '2', '3', 'ln', '='].map((btn, index) => (
+                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className={`font-bold p-4 rounded-lg shadow-md transition-colors ${index === 4 ? 'col-span-1 bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}>{btn}</button>
+              ))}
+              {['0', '.', 'pi', 'e'].map(btn => (
+                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+              ))}
+            </div>
+          </div>
+        );
+        
+        // The Real Analysis calculator UI
+        const RealAnalysisCalculator = () => (
+          <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700">
+            <div className="flex justify-center border-b border-gray-700 mb-6">
+              {['limits', 'continuity', 'differentiability'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setAnalysisSubTab(tab)}
+                  className={`py-3 px-6 text-sm font-semibold transition-colors duration-300 ${analysisSubTab === tab ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
+            </div>
+            
+            <div className="mb-4">
+              <label htmlFor="func-input" className="block text-sm font-medium text-gray-300 mb-1">Function f(x):</label>
+              <input
+                id="func-input"
+                type="text"
+                value={analysisFunction}
+                onChange={(e) => setAnalysisFunction(e.target.value)}
+                placeholder="e.g., x^2, sin(x)"
+                className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+              />
+            </div>
+            <div className="mb-6">
+              <label htmlFor="point-input" className="block text-sm font-medium text-gray-300 mb-1">Point a:</label>
+              <input
+                id="point-input"
+                type="number"
+                value={analysisPoint}
+                onChange={(e) => setAnalysisPoint(e.target.value)}
+                placeholder="e.g., 0, 1"
+                className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+              />
+            </div>
+            
+            <button
+              onClick={handleCompute}
+              disabled={isLoading}
+              className="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 disabled:opacity-50 transition duration-300 mb-6"
+            >
+              Compute
+            </button>
+            
+            {/* Results and Solution section */}
+            <div className="bg-gray-900 p-4 rounded-lg border border-gray-700 min-h-[150px] overflow-auto">
+              {isLoading ? (
+                <div className="flex justify-center items-center h-full flex-col">
+                  <div className="w-10 h-10 border-4 border-t-4 border-gray-600 border-t-blue-500 rounded-full animate-spin"></div>
+                  <p className="mt-4 text-sm text-gray-400">Computing solution...</p>
+                </div>
+              ) : error ? (
+                <p className="text-red-400 font-semibold text-center">{error}</p>
+              ) : analysisResult ? (
+                <div className="space-y-4">
+                  <h3 className="text-xl font-bold text-blue-300">Result:</h3>
+                  <p className="text-lg text-white">{analysisResult}</p>
+                  {analysisSolution && (
+                    <React.Fragment>
+                      <h3 className="text-xl font-bold text-blue-300 mt-6">Detailed Solution:</h3>
+                      <div className="prose prose-sm prose-invert text-gray-300 leading-relaxed max-w-none">
+                        <p>{analysisSolution}</p>
+                      </div>
+                    </React.Fragment>
+                  )}
+                </div>
+              ) : (
+                <p className="text-gray-500 italic text-center">Results and solutions will appear here.</p>
+              )}
+            </div>
+          </div>
+        );
+        
+        return (
+          <div className="max-w-6xl mx-auto">
+            <h1 className="text-5xl font-extrabold text-center text-blue-400 mb-2">Bethelsolv</h1>
+            <p className="text-center text-gray-400 mb-8">A computational tool for Real Analysis & Scientific calculations.</p>
+            
+            {/* Tab switcher */}
+            <div className="flex justify-center mb-8">
+              <button
+                onClick={() => setActiveTab('real-analysis')}
+                className={`py-3 px-6 text-lg font-bold transition-colors duration-300 rounded-l-lg ${activeTab === 'real-analysis' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >
+                Real Analysis
+              </button>
+              <button
+                onClick={() => setActiveTab('scientific')}
+                className={`py-3 px-6 text-lg font-bold transition-colors duration-300 rounded-r-lg ${activeTab === 'scientific' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >
+                Scientific
+              </button>
+            </div>
+            
+            {activeTab === 'real-analysis' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Analysis Section */}
+                <div className="md:order-2">
+                  <h2 className="text-2xl font-semibold mb-4 text-center">Function Analysis</h2>
+                  <RealAnalysisCalculator />
+                </div>
+                
+                {/* Graphing Panel */}
+                <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700 flex flex-col items-center md:order-1">
+                  <h2 className="text-2xl font-semibold mb-4 text-center">Graph Plotting</h2>
+                  <div class="canvas-container">
+                    <canvas ref={canvasRef} class="bg-gray-100 rounded-lg shadow-inner"></canvas>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {activeTab === 'scientific' && (
+              <div className="flex justify-center">
+                <ScientificCalculator />
+              </div>
+            )}
+            
+          </div>
+        );
+      };
+      
+      // Render the App component into the root element
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
