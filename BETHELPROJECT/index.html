@@ -1,13 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Bethelsolv Standalone Calculator</title>
-    <!--
-      This script loads Tailwind CSS from a CDN. It enables utility-first styling.
-      We're using a single file approach here, which is why Tailwind is loaded this way.
-    -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       /* Apply a custom font for better aesthetics */
@@ -32,34 +28,21 @@
         max-width: none !important;
       }
     </style>
-    <!--
-      Load the Inter font from Google Fonts.
-    -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet"/>
 </head>
 <body class="bg-gray-900 text-white min-h-screen p-4 md:p-8">
     <div id="root"></div>
 
-    <!--
-      Load React and ReactDOM from CDN. This is required to run the application
-      as a single HTML file without a build step.
-    -->
+    <!-- React + Babel -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
 
-    <!--
-      Load the Math.js library for calculations.
-    -->
+    <!-- Math.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.1/math.min.js"></script>
-    
-    <!--
-      This is the core of the application. The user's React code is placed here
-      inside a script tag with the type "text/babel". Babel transpiles the JSX
-      syntax into regular JavaScript that the browser can understand.
-    -->
+
     <script type="text/babel">
       // Main App component for the Bethelsolv calculator
       function App() {
@@ -75,12 +58,47 @@
         const [isLoading, setIsLoading] = React.useState(false);
         const [error, setError] = React.useState('');
         
-        // Ref for the function input to manage focus
+        // Refs for inputs and canvas
         const funcInputRef = React.useRef(null);
-        
-        // Reference to the canvas for plotting
+        const pointInputRef = React.useRef(null);
         const canvasRef = React.useRef(null);
-        
+
+        // Helper: Normalize user-entered math expression to be more forgiving
+        const normalizeExpression = (raw) => {
+          if (typeof raw !== 'string') return '';
+          let s = raw.trim();
+
+          if (s === '') return s;
+
+          // replace common unicode characters
+          s = s.replace(/π/g, 'pi');
+
+          // map ln to log (natural log)
+          s = s.replace(/\bln\b/g, 'log');
+
+          // Put a '*' between number and variable or '(' => 2x -> 2*x, 2(x) -> 2*(x)
+          // and between variable/closing-paren and variable/open-paren => x(x) -> x*(x), x2 -> x*2
+          // Do this carefully to avoid breaking function names:
+          s = s.replace(/(\d)\s*(?=\(?[a-zA-Zπ])/g, '$1*');        // 2x -> 2*x, 2sin -> 2*sin
+          s = s.replace(/([a-zA-Z0-9_\)])\s+([a-zA-Z0-9_\(π])/g, '$1*$2'); // x y -> x*y  ; x(x) -> x*(x)
+
+          // Auto-wrap common functions when user types `sin x` or `sinx` -> `sin(x)`
+          const funcs = ['sin','cos','tan','asin','acos','atan','sqrt','log','exp','abs','sec','csc','cot'];
+          funcs.forEach(fn => {
+            // sin x  -> sin(x)
+            const re1 = new RegExp('\\b' + fn + '\\b\\s+([0-9a-zA-Z_.\\-]+)', 'gi');
+            s = s.replace(re1, (m,p1)=>`${fn}(${p1})`);
+            // sinx -> sin(x) (only if immediately followed by letter/number without "(")
+            const re2 = new RegExp('\\b' + fn + '([A-Za-z0-9_\\.])', 'gi');
+            s = s.replace(re2, (m,p1)=>`${fn}(${p1})`);
+          });
+
+          // tidy up repeated spaces
+          s = s.replace(/\s+/g, ' ');
+
+          return s;
+        };
+
         // Use an effect to re-plot the graph whenever relevant state changes
         React.useEffect(() => {
             const plotGraphWithState = () => {
@@ -90,12 +108,10 @@
                 });
             };
             plotGraphWithState(); // Initial plot
-            
-            // Add event listener for window resize to redraw the graph
             window.addEventListener('resize', plotGraphWithState);
             return () => window.removeEventListener('resize', plotGraphWithState);
         }, [analysisFunction, analysisPoint, analysisResult, analysisSubTab]);
-        
+
         // Use an effect to focus on the function input field when the tab changes
         React.useEffect(() => {
             if (activeTab === 'real-analysis' && funcInputRef.current) {
@@ -104,7 +120,7 @@
         }, [activeTab]);
 
         // --- Core Real Analysis Logic ---
-        
+
         // Function to compute the analysis based on the selected sub-tab
         const handleCompute = () => {
           setError('');
@@ -119,9 +135,10 @@
           }
           
           try {
-            // First, try to parse the function to catch syntax errors immediately.
-            const expr = window.math.parse(analysisFunction);
-            
+            const normalized = normalizeExpression(analysisFunction);
+            // Quick parse check (attempt to compile) to catch syntax errors immediately.
+            const compiledCheck = window.math.compile ? window.math.compile(normalized) : window.math.parse(normalized);
+
             const a = parseFloat(analysisPoint);
             if (isNaN(a)) {
               setError('Point of interest must be a valid number.');
@@ -133,15 +150,15 @@
             let solution;
             switch (analysisSubTab) {
               case 'limits':
-                result = computeLimit(analysisFunction, a, expr);
+                result = computeLimit(normalized, a);
                 solution = generateClientSideSolution('limits', analysisFunction, a, result);
                 break;
               case 'continuity':
-                result = checkContinuity(analysisFunction, a, expr);
+                result = checkContinuity(normalized, a);
                 solution = generateClientSideSolution('continuity', analysisFunction, a, result);
                 break;
               case 'differentiability':
-                result = testDifferentiability(analysisFunction, a, expr);
+                result = testDifferentiability(normalized, a);
                 solution = generateClientSideSolution('differentiability', analysisFunction, a, result);
                 break;
               default:
@@ -160,11 +177,10 @@
 
           } catch (e) {
             console.error("Error during computation:", e);
-            // More user-friendly error message for common syntax issues
-            if (e.message.includes('Unexpected end of expression') || e.message.includes('Function not found')) {
-                setError(`Invalid function syntax. Please ensure your function is complete and correctly formatted (e.g., sin(x), log(x)).`);
+            if (e && e.message && (e.message.includes('Unexpected end of expression') || e.message.includes('Function not found'))) {
+                setError(`Invalid function syntax. Please ensure your function is complete and correctly formatted (e.g., sin(x), log(x), x^2).`);
             } else {
-                setError(`An error occurred: ${e.message}. Please check your function and point.`);
+                setError(`An error occurred: ${e && e.message ? e.message : e}. Please check your function and point.`);
             }
           } finally {
             setIsLoading(false);
@@ -175,107 +191,121 @@
           }
         };
         
-        // Helper function to compute the limit
-        const computeLimit = (funcStr, a, expr) => {
+        // Helper function to compute the limit (numerical approximation)
+        const computeLimit = (normalizedStr, a) => {
           const scope = { x: 0 };
           const h = 1e-6;
-          
-          // Approach from the left
-          scope.x = a - h;
-          const leftLimit = expr.evaluate(scope);
-          
-          // Approach from the right
-          scope.x = a + h;
-          const rightLimit = expr.evaluate(scope);
-          
-          if (Math.abs(leftLimit - rightLimit) < 1e-5) {
-            return { text: `Limit is ${leftLimit.toFixed(4)}`, value: leftLimit };
-          } else {
-            return { text: `The limit does not exist.`, value: null };
+          try {
+            scope.x = a - h;
+            const leftLimit = window.math.evaluate(normalizedStr, scope);
+            scope.x = a + h;
+            const rightLimit = window.math.evaluate(normalizedStr, scope);
+            
+            if (!isFinite(leftLimit) || !isFinite(rightLimit)) {
+              return { text: 'Could not compute limit (non-finite value encountered).', value: null };
+            }
+            
+            if (Math.abs(leftLimit - rightLimit) < 1e-5) {
+              return { text: `Limit is ${leftLimit.toFixed(6)}`, value: leftLimit };
+            } else {
+              return { text: `The limit does not exist.`, value: null };
+            }
+          } catch (e) {
+            return { text: `Could not compute limit: ${e && e.message ? e.message : e}`, value: null };
           }
         };
         
         // Helper function to check continuity
-        const checkContinuity = (funcStr, a, expr) => {
+        const checkContinuity = (normalizedStr, a) => {
           const scope = { x: a };
           const h = 1e-6;
-          
-          // Condition 1: f(a) is defined
-          let fa;
           try {
-            fa = expr.evaluate(scope);
-            if (!isFinite(fa)) {
+            // Condition 1: f(a) is defined
+            let fa;
+            try {
+              fa = window.math.evaluate(normalizedStr, scope);
+              if (!isFinite(fa)) {
+                return { text: 'Discontinuous: f(a) is not defined (non-finite).', continuous: false, fa: null };
+              }
+            } catch (e) {
               return { text: 'Discontinuous: f(a) is not defined.', continuous: false, fa: null };
             }
+            
+            // Condition 2: Limit exists
+            scope.x = a - h;
+            const leftLimit = window.math.evaluate(normalizedStr, scope);
+            scope.x = a + h;
+            const rightLimit = window.math.evaluate(normalizedStr, scope);
+            if (!isFinite(leftLimit) || !isFinite(rightLimit)) {
+              return { text: 'Discontinuous: one-sided limits are not finite.', continuous: false, fa: fa };
+            }
+            if (Math.abs(leftLimit - rightLimit) > 1e-5) {
+              return { text: 'Discontinuous: The limit does not exist.', continuous: false, fa: fa };
+            }
+            const limit = leftLimit;
+            
+            // Condition 3: Limit equals f(a)
+            if (Math.abs(limit - fa) < 1e-5) {
+              return { text: 'The function is continuous at this point.', continuous: true, fa: fa };
+            } else {
+              return { text: 'Discontinuous: The limit is not equal to f(a).', continuous: false, fa: fa };
+            }
           } catch (e) {
-            return { text: 'Discontinuous: f(a) is not defined.', continuous: false, fa: null };
-          }
-          
-          // Condition 2: Limit exists
-          scope.x = a - h;
-          const leftLimit = expr.evaluate(scope);
-          scope.x = a + h;
-          const rightLimit = expr.evaluate(scope);
-          if (Math.abs(leftLimit - rightLimit) > 1e-5) {
-            return { text: 'Discontinuous: The limit does not exist.', continuous: false, fa: fa };
-          }
-          const limit = leftLimit;
-          
-          // Condition 3: Limit equals f(a)
-          if (Math.abs(limit - fa) < 1e-5) {
-            return { text: 'The function is continuous at this point.', continuous: true, fa: fa };
-          } else {
-            return { text: 'Discontinuous: The limit is not equal to f(a).', continuous: false, fa: fa };
+            return { text: `Could not check continuity: ${e && e.message ? e.message : e}`, continuous: false, fa: null };
           }
         };
         
-        // Helper function to test differentiability
-        const testDifferentiability = (funcStr, a, expr) => {
-          const derivativeExpr = window.math.derivative(expr, 'x');
+        // Helper function to test differentiability (symbolic derivative where possible)
+        const testDifferentiability = (normalizedStr, a) => {
           const scope = { x: a };
-          
           try {
-            const derivativeValue = derivativeExpr.evaluate(scope);
+            // compute derivative symbolically then evaluate at x=a
+            const derivativeNode = window.math.derivative(normalizedStr, 'x');
+            // evaluate derivative by converting node to string (safe)
+            const derivativeStr = derivativeNode.toString();
+            const derivativeValue = window.math.evaluate(derivativeStr, scope);
             if (isFinite(derivativeValue)) {
-              return { text: `The function is differentiable. Derivative: ${derivativeValue.toFixed(4)}.`, differentiable: true };
+              return { text: `The function is differentiable. Derivative: ${derivativeValue.toFixed(6)}.`, differentiable: true };
             } else {
-              return { text: 'Not differentiable. The derivative does not exist.', differentiable: false };
+              return { text: 'Not differentiable. The derivative does not exist (non-finite).', differentiable: false };
             }
           } catch (e) {
-            return { text: 'Not differentiable. The derivative is not defined.', differentiable: false };
+            return { text: 'Not differentiable. The derivative is not defined or could not be computed.', differentiable: false };
           }
         };
 
-        // This is the new, standalone function to generate the detailed solution
+        // This is the function to generate the detailed solution (client-side)
         const generateClientSideSolution = (type, func, point, result) => {
             let solution = '';
             switch(type) {
                 case 'limits':
                     solution = `### Detailed Solution for Limits
                     
-To find the limit of $f(x) = ${func}$ as $x$ approaches $a = ${point}$, we check the behavior of the function from both the left and right sides of the point.
-1.  **Left-hand limit:** We evaluate the function for values of $x$ slightly less than ${point}$.
-2.  **Right-hand limit:** We evaluate the function for values of $x$ slightly greater than ${point}$.
-3.  **Conclusion:** The limit exists if and only if the left-hand limit is equal to the right-hand limit.
+To find the limit of f(x) = ${func} as x approaches a = ${point}, we check the behavior of the function from both the left and right sides of the point.
+1.  Left-hand limit: evaluate f(x) for x slightly less than ${point}.
+2.  Right-hand limit: evaluate f(x) for x slightly greater than ${point}.
+3.  Conclusion: the limit exists if the two sides are equal.
 
-**Result:** ${result.text}`;
+Result: ${result.text}`;
                     break;
                 case 'continuity':
                     solution = `### Detailed Solution for Continuity
                     
-To determine if $f(x) = ${func}$ is continuous at $a = ${point}$, we must check three conditions:
-1.  **Is $f(a)$ defined?** The function must have a defined value at the point.
-2.  **Does the limit exist?** The limit of the function as $x$ approaches $a$ must exist. This requires the left-hand and right-hand limits to be equal.
-3.  **Does the limit equal $f(a)$?** The value of the limit must be equal to the value of the function at the point.
+To determine if f(x) = ${func} is continuous at a = ${point}, check:
+1. f(a) is defined.
+2. The limit exists as x -> a.
+3. The limit equals f(a).
 
-**Result:** ${result.text}`;
+Result: ${result.text}`;
                     break;
                 case 'differentiability':
                     solution = `### Detailed Solution for Differentiability
                     
-To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determine if the derivative of the function exists at that point. A function is differentiable at a point if it is both continuous at that point and has a well-defined, non-vertical tangent line. In other words, the derivative must be a finite number.
+To check if f(x) = ${func} is differentiable at a = ${point}, we:
+1. Check continuity at the point.
+2. Compute the derivative and ensure it is finite at the point.
 
-**Result:** ${result.text}`;
+Result: ${result.text}`;
                     break;
                 default:
                     solution = 'Solution generation not supported for this type.';
@@ -285,27 +315,39 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
         
         // --- Graph Plotting Logic ---
         const plotGraph = (funcStr, point, analysisData) => {
-          // This check prevents the error when the function input is empty or invalid.
+          // If empty or invalid, clear canvas and return
           if (!window.math || !canvasRef.current || typeof funcStr !== 'string' || funcStr.trim() === '') {
-            // Clear the canvas to avoid showing old data.
             if (canvasRef.current) {
                 const ctx = canvasRef.current.getContext('2d');
                 ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
             }
             return;
           }
+
           const canvas = canvasRef.current;
           const ctx = canvas.getContext('2d');
           const dpr = window.devicePixelRatio || 1;
           const rect = canvas.getBoundingClientRect();
           canvas.width = rect.width * dpr;
           canvas.height = rect.height * dpr;
-          ctx.scale(dpr, dpr);
-          
+
+          // reset transform and scale for crisp drawing
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
           ctx.clearRect(0, 0, rect.width, rect.height);
           
           try {
-            const expr = window.math.parse(funcStr);
+            const normalized = normalizeExpression(funcStr);
+
+            // compile the expression once for efficiency
+            let compiled;
+            try {
+              compiled = window.math.compile(normalized);
+            } catch (err) {
+              // fallback to parse
+              compiled = null;
+            }
+
             const scope = { x: 0 };
             const xScale = rect.width / 10;
             const yScale = rect.height / 10;
@@ -344,7 +386,17 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
             let isFirstPoint = true;
             for (let x = -5; x <= 5; x += step) {
               scope.x = x;
-              const y = expr.evaluate(scope);
+              let y;
+              try {
+                if (compiled) {
+                  y = compiled.evaluate(scope);
+                } else {
+                  y = window.math.evaluate(normalized, scope);
+                }
+              } catch (err) {
+                // skip invalid point
+                continue;
+              }
               if (isFinite(y)) {
                 const canvasX = x * xScale + xOffset;
                 const canvasY = -y * yScale + yOffset;
@@ -359,41 +411,42 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
             ctx.stroke();
 
             // --- Add visualizations for Limits and Continuity ---
-            if (analysisData.result) {
+            if (analysisData && analysisData.result) {
               const a = parseFloat(point);
-              const canvasX_a = a * xScale + xOffset;
-              
-              // Visualizing Continuity and Discontinuity
-              if (analysisData.subTab === 'continuity') {
-                  const continuityResult = checkContinuity(funcStr, a, expr);
-                  const fa = continuityResult.fa;
-                  if (fa !== null && !continuityResult.continuous) {
-                      // Draw a small red circle for discontinuity
-                      const canvasY_fa = -fa * yScale + yOffset;
-                      ctx.beginPath();
-                      ctx.arc(canvasX_a, canvasY_fa, 5, 0, 2 * Math.PI);
-                      ctx.fillStyle = '#EF4444'; // Red color
-                      ctx.fill();
-                  }
-              }
+              if (!isNaN(a)) {
+                const canvasX_a = a * xScale + xOffset;
+                
+                // Visualizing Continuity and Discontinuity
+                if (analysisData.subTab === 'continuity') {
+                    const continuityResult = checkContinuity(normalizeExpression(funcStr), a);
+                    const fa = continuityResult.fa;
+                    if (fa !== null && !continuityResult.continuous) {
+                        // Draw a small red circle for discontinuity
+                        const canvasY_fa = -fa * yScale + yOffset;
+                        ctx.beginPath();
+                        ctx.arc(canvasX_a, canvasY_fa, 5, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#EF4444'; // Red color
+                        ctx.fill();
+                    }
+                }
 
-              // Visualizing Limits
-              if (analysisData.subTab === 'limits' || analysisData.subTab === 'continuity') {
-                  const limitResult = computeLimit(funcStr, a, expr);
-                  const limitValue = limitResult.value;
+                // Visualizing Limits
+                if (analysisData.subTab === 'limits' || analysisData.subTab === 'continuity') {
+                    const limitResult = computeLimit(normalizeExpression(funcStr), a);
+                    const limitValue = limitResult.value;
 
-                  if (limitValue !== null && isFinite(limitValue)) {
-                      const canvasY_limit = -limitValue * yScale + yOffset;
+                    if (limitValue !== null && isFinite(limitValue)) {
+                        const canvasY_limit = -limitValue * yScale + yOffset;
 
-                      // Draw a small blue circle to show the limit point
-                      ctx.beginPath();
-                      ctx.arc(canvasX_a, canvasY_limit, 5, 0, 2 * Math.PI);
-                      ctx.fillStyle = '#3B82F6'; // Blue color
-                      ctx.fill();
-                  }
-              }
-            }
-            
+                        // Draw a small blue circle to show the limit point
+                        ctx.beginPath();
+                        ctx.arc(canvasX_a, canvasY_limit, 5, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#3B82F6'; // Blue color
+                        ctx.fill();
+                    }
+                }
+              } // end if !isNaN(a)
+            } // end if analysisData.result
           } catch (e) {
             console.error("Error plotting graph:", e);
           }
@@ -408,19 +461,29 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
           if (value === 'C') {
             setScientificInput('');
             setScientificResult('');
+            // keep focus
+            if (funcInputRef.current) funcInputRef.current.focus();
           } else if (value === 'DEL') {
             setScientificInput((prev) => prev.slice(0, -1));
+            if (funcInputRef.current) funcInputRef.current.focus();
           } else if (value === '=') {
             try {
-              const result = window.math.evaluate(scientificInput);
+              // Normalize common tokens for the scientific input as well
+              const normalized = normalizeExpression(scientificInput);
+              const result = window.math.evaluate(normalized);
               setScientificResult(window.math.format(result, { precision: 14 }));
             } catch (e) {
               setScientificResult('Error');
+            } finally {
+              if (funcInputRef.current) funcInputRef.current.focus();
             }
           } else if (['sin', 'cos', 'tan', 'sqrt', 'log', 'ln'].includes(value)) {
+            // ln -> log mapping will be handled in normalizeExpression
             setScientificInput((prev) => prev + value + '(');
+            if (funcInputRef.current) funcInputRef.current.focus();
           } else {
             setScientificInput((prev) => prev + value);
+            if (funcInputRef.current) funcInputRef.current.focus();
           }
         };
         
@@ -432,22 +495,64 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
             </div>
             <div className="grid grid-cols-5 gap-2">
               {['C', '(', ')', 'DEL', '/'].map(btn => (
-                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+                <button
+                  key={btn}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleScientificButtonClick(btn); }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors"
+                >
+                  {btn}
+                </button>
               ))}
               {['sin', 'cos', 'tan', 'sqrt', '*'].map(btn => (
-                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+                <button
+                  key={btn}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleScientificButtonClick(btn); }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors"
+                >
+                  {btn}
+                </button>
               ))}
               {['7', '8', '9', '^', '-'].map(btn => (
-                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+                <button
+                  key={btn}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleScientificButtonClick(btn); }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors"
+                >
+                  {btn}
+                </button>
               ))}
               {['4', '5', '6', 'log', '+'].map(btn => (
-                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+                <button
+                  key={btn}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleScientificButtonClick(btn); }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors"
+                >
+                  {btn}
+                </button>
               ))}
               {['1', '2', '3', 'ln', '='].map((btn, index) => (
-                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className={`font-bold p-4 rounded-lg shadow-md transition-colors ${index === 4 ? 'col-span-1 bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}>{btn}</button>
+                <button
+                  key={btn}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleScientificButtonClick(btn); }}
+                  className={`font-bold p-4 rounded-lg shadow-md transition-colors ${index === 4 ? 'col-span-1 bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}
+                >
+                  {btn}
+                </button>
               ))}
               {['0', '.', 'pi', 'e'].map(btn => (
-                <button key={btn} onClick={() => handleScientificButtonClick(btn)} className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors">{btn}</button>
+                <button
+                  key={btn}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleScientificButtonClick(btn); }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white font-bold p-4 rounded-lg shadow-md transition-colors"
+                >
+                  {btn}
+                </button>
               ))}
             </div>
           </div>
@@ -460,7 +565,8 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
               {['limits', 'continuity', 'differentiability'].map(tab => (
                 <button
                   key={tab}
-                  onClick={() => setAnalysisSubTab(tab)}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); setAnalysisSubTab(tab); if (funcInputRef.current) funcInputRef.current.focus(); }}
                   className={`py-3 px-6 text-sm font-semibold transition-colors duration-300 ${analysisSubTab === tab ? 'border-b-2 border-blue-500 text-blue-400' : 'text-gray-400 hover:text-white'}`}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -473,9 +579,16 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
               <input
                 id="func-input"
                 type="text"
+                autoFocus
                 ref={funcInputRef}
                 value={analysisFunction}
-                onChange={(e) => setAnalysisFunction(e.target.value)}
+                onChange={(e) => {
+                  setAnalysisFunction(e.target.value);
+                  // keep focus on the input after each keystroke (should remain)
+                  if (funcInputRef.current) {
+                    funcInputRef.current.focus();
+                  }
+                }}
                 placeholder="e.g., x^2, sin(x)"
                 className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
               />
@@ -485,15 +598,23 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
               <input
                 id="point-input"
                 type="number"
+                ref={pointInputRef}
                 value={analysisPoint}
-                onChange={(e) => setAnalysisPoint(e.target.value)}
+                onChange={(e) => {
+                  setAnalysisPoint(e.target.value);
+                  // Keep focus in the point input if user is editing it
+                  if (pointInputRef.current) {
+                    pointInputRef.current.focus();
+                  }
+                }}
                 placeholder="e.g., 0, 1"
                 className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
               />
             </div>
             
             <button
-              onClick={handleCompute}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); handleCompute(); if (funcInputRef.current) funcInputRef.current.focus(); }}
               disabled={isLoading}
               className="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 disabled:opacity-50 transition duration-300 mb-6"
             >
@@ -537,13 +658,13 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
             {/* Tab switcher */}
             <div className="flex justify-center mb-8">
               <button
-                onClick={() => setActiveTab('real-analysis')}
+                onClick={() => { setActiveTab('real-analysis'); if (funcInputRef.current) funcInputRef.current.focus(); }}
                 className={`py-3 px-6 text-lg font-bold transition-colors duration-300 rounded-l-lg ${activeTab === 'real-analysis' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
               >
                 Real Analysis
               </button>
               <button
-                onClick={() => setActiveTab('scientific')}
+                onClick={() => { setActiveTab('scientific'); if (funcInputRef.current) funcInputRef.current.focus(); }}
                 className={`py-3 px-6 text-lg font-bold transition-colors duration-300 rounded-r-lg ${activeTab === 'scientific' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
               >
                 Scientific
@@ -561,8 +682,8 @@ To check if $f(x) = ${func}$ is differentiable at $a = ${point}$, we must determ
                 {/* Graphing Panel */}
                 <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700 flex flex-col items-center md:order-1">
                   <h2 className="text-2xl font-semibold mb-4 text-center">Graph Plotting</h2>
-                  <div class="canvas-container">
-                    <canvas ref={canvasRef} class="bg-gray-100 rounded-lg shadow-inner"></canvas>
+                  <div className="canvas-container">
+                    <canvas ref={canvasRef} className="bg-gray-100 rounded-lg shadow-inner"></canvas>
                   </div>
                 </div>
               </div>
